@@ -1,0 +1,1 @@
+# journal-android-multilingual-ext_template
