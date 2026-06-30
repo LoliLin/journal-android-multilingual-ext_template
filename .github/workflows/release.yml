@@ -1,0 +1,105 @@
+name: Package and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'tag'
+        required: true
+        default: 'latest'
+      release_name:
+        description: 'Release Title'
+        required: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 必须赋予写权限，否则无法 push 代码和创建 release
+
+    steps:
+      - name: Check Out
+        uses: actions/checkout@v4
+        with:
+          # 默认只拉取最新的一次 commit，我们需要确保能正常 push
+          fetch-depth: 0 
+
+      # 1. 解析 manifest.json 获取版本信息和注册名称
+      - name: Parse Manifest Info
+        id: manifest
+        run: |
+          if [ ! -f "manifest.json" ]; then
+            echo "Error: manifest.json not found!"
+            exit 1
+          fi
+          
+          REG_NAME=$(jq -r '.registerName' manifest.json)
+          VERSION_CODE=$(jq -r '.versionCode' manifest.json)
+          VERSION_NAME=$(jq -r '.versionName' manifest.json)
+          
+          echo "reg_name=$REG_NAME" >> $GITHUB_OUTPUT
+          echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
+          echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
+
+      # 2. 动态更新仓库里的 update.json（直接在本地或指定目录修改）
+      # 规范中提到了本地可能存在一个全局的 update.json，这里我们先更新它
+      # 如果你希望它在 downloads/ 目录下，我们稍后把它复制进去
+      - name: Update update.json
+        run: |
+          # 假设你的项目里原本就有个全局的 update.json，或者我们将它保存在 downloads/update.json
+          # 为了保证能被 git 跟踪，我们直接在项目根目录或指定目录下操作
+          mkdir -p downloads
+          UPDATE_FILE="downloads/update.json"
+          
+          ZIP_NAME="${{ steps.manifest.outputs.reg_name }}_v${{ steps.manifest.outputs.version_name }}.zip"
+          DOWNLOAD_URL="${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.event.inputs.tag_name }}/$ZIP_NAME"
+          
+          if [ ! -f "$UPDATE_FILE" ]; then
+            echo "{}" > "$UPDATE_FILE"
+          fi
+          
+          V_CODE="${{ steps.manifest.outputs.version_code }}"
+          V_NAME="${{ steps.manifest.outputs.version_name }}"
+          
+          jq --arg code "$V_CODE" \
+             --arg name "$V_NAME" \
+             --arg url "$DOWNLOAD_URL" \
+             '.[$code] = {"versionName": $name, "url": $url}' "$UPDATE_FILE" > temp.json && mv temp.json "$UPDATE_FILE"
+          
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
+      # 3. 提交修改后的 update.json 并推送到仓库
+      - name: Commit & Push update.json
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 添加修改的文件
+          git add downloads/update.json
+          
+          # 检查是否有内容变更，有变更才提交，防止脚本报错
+          if ! git diff --cached --exit-code; then
+            git commit -m "chore: auto update update.json for version ${{ steps.manifest.outputs.version_name }}"
+            git push origin HEAD:${{ github.ref }}
+          else
+            echo "No changes in update.json, skipping commit."
+          fi
+
+      # 4. 创建 ZIP 压缩包
+      # 注意：在 commit 之后再打包，确保此时打包的内容或 downloads 目录处于正确状态
+      - name: ZIP Extension Pack
+        run: |
+          ZIP_NAME="${{ env.ZIP_NAME }}"
+          # 打包排除 .git 和 .github，但包含整个项目以及刚刚更新的 downloads/update.json
+          zip -r "downloads/$ZIP_NAME" . -x "*.git*" "*.github/*" "downloads/$ZIP_NAME"
+
+      # 5. 发布到 GitHub Release
+      - name: Release 
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "downloads/*"
+          tag: ${{ github.event.inputs.tag_name }}
+          name: ${{ github.event.inputs.release_name || github.event.inputs.tag_name }}
+          generateReleaseNotes: true   
+          allowUpdates: true
+          
