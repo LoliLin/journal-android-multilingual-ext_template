@@ -7,6 +7,7 @@ Extension pack is currently add new substances and i18n as a set, following stru
 ```
 extension_pack.zip
 ├── manifest.json
+├── icon.png                       (optional, for display)
 ├── substances/
 │   ├── zh_cn/   
 │   │   └── MyNewDrug.json
@@ -29,6 +30,7 @@ extension_pack.zip
 }
 ```
 the `registerName` is the **Unique** indentifer for the extension pack, it should be unique and static.  
+the `icon` (optional) is the relative path of the icon image inside the pack, e.g. `icon.png`.  
 the `titleTranslatable` is the translate key of the title. Of course you could define the key in your i18n dir.  
 the `descriptionTranslateable` is the translate key of the description.    
 the `officalLink` is your link of extension  
@@ -39,7 +41,7 @@ the `versionCode` is the compareable version
 ## UpdateJson
 ```json
 {
-  "2": {"versionName": "2.0.0", "url": "https://example.com/ext_v2.0.0.zip"}
+  "2": {"versionName": "2.0.0", "url": "https://example.com/ext_v2.0.0.zip", "sha256": "<hex sha256 of the zip>"}
 }
 ```
 
@@ -47,10 +49,20 @@ the `versionCode` is the compareable version
 {
  "<versionCode>": {
     "versionName": "<versionName>",
-    "url": "<directDownloadUrl>"
+    "url": "<directDownloadUrl>",
+    "sha256": "<hex sha256 of the zip>"
 `}  .. and so on
 }
 ```
+
+### Safety requirements (v2 protocol)
+
+- `sha256` is **required**: the app verifies the downloaded zip's SHA-256 against this value; on mismatch the install is refused. Update entries without `sha256` are ignored (treated as no update).
+- `url` and `updateJsonLink` must be `https`, otherwise the update check/download fails directly.
+- Generate the checksum in your release flow, e.g.:
+  ```bash
+  cd <pack dir> && zip -r ../ext.zip . && sha256sum ../ext.zip
+  ```
 
 ## i18n
 
